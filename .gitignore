@@ -1,0 +1,43 @@
+# Gradle / Kotlin
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Logs
+*.log
+logs/
+
+# Spring Boot local overrides
+application-local.yml
+application-local.yaml
+application-local.properties
+.env
+.env.*
+
+# Local databases and temporary persistence files
+*.db
+*.mv.db
+*.trace.db
+*.h2.db
+*.sqlite
+*.sqlite3
+
+# JVM crash logs
+hs_err_pid*
+replay_pid*
