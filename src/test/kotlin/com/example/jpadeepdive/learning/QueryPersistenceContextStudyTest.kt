@@ -151,10 +151,10 @@ class QueryPersistenceContextStudyTest {
 
     @Test
     fun `08 persist 직후 findById는 INSERT 없이 새 관리 객체를 찾는다`() {
-        val newcomer = QueryStudyMember(2L, 102L, "lee")
-        em.persist(newcomer)
+        val newcomer = QueryStudyMember(2L, 102L, "lee") // 비영속 상태
+        em.persist(newcomer) // 영속 상태. 아직 DB에 INSERT되지 않았다. (영속성 컨텍스트에만 존재)
 
-        assertSame(newcomer, repository.findById(2L).orElseThrow())
+        assertSame(newcomer, repository.findById(2L).orElseThrow()) // 영속성 엔티티에서 조회
         assertTrue(em.contains(newcomer))
         assertSql()
         assertEquals(0L, databaseCount(2L))
@@ -168,7 +168,7 @@ class QueryPersistenceContextStudyTest {
         em.persist(newcomer)
         assertSql()
 
-        assertSame(newcomer, repository.findByName("lee"))
+        assertSame(newcomer, repository.findByName("lee")) // JPQL 발생 -> flush가 발생하며 INSERT가 먼저 실행된다.
         assertSql("insert", "select")
         assertEquals(1L, databaseCount(2L))
         assertTrue(em.contains(newcomer)) // flush는 clear도 commit도 아니다.
@@ -179,9 +179,9 @@ class QueryPersistenceContextStudyTest {
     fun `10 AUTO는 변경 감지 UPDATE를 SELECT보다 먼저 실행한다`() {
         val managed = repository.findById(1L).orElseThrow()
         managed.name = "changed"
-        assertEquals("kim", databaseName())
+        assertEquals("kim", databaseName()) // JDBC로 SQL을 직접 실행
 
-        assertSame(managed, repository.findByName("changed"))
+        assertSame(managed, repository.findByName("changed")) // JPA로 인한 조회 -> 객체 변경 감지
         assertSql("select", "select", "update", "select")
         assertEquals("changed", databaseName())
         assertSql("select", "select", "update", "select", "select")
@@ -190,14 +190,14 @@ class QueryPersistenceContextStudyTest {
 
     @Test
     fun `11 Hibernate AUTO는 관련 없는 테이블 조회 전 INSERT를 미룬다`() {
-        em.persist(QueryStudyMember(2L, 102L, "lee"))
+        em.persist(QueryStudyMember(2L, 102L, "lee")) // 영속화
 
-        val notes = em.createQuery("select n from QueryStudyNote n", QueryStudyNote::class.java).resultList
+        val notes = em.createQuery("select n from QueryStudyNote n", QueryStudyNote::class.java).resultList // JPQL 실행
         assertTrue(notes.isEmpty())
         assertSql("select")
-        assertEquals(0L, databaseCount(2L))
+        assertEquals(0L, databaseCount(2L)) // 아직 INSERT되지 않았다.
 
-        assertNotNull(repository.findByName("lee"))
+        assertNotNull(repository.findByName("lee")) // JPQL 발생 -> flush가 발생하며 INSERT가 먼저 실행된다.
         assertSql("select", "select", "insert", "select")
         // 쿼리와 변경 대상 테이블의 겹침을 보는 Hibernate의 최적화.
     }
@@ -206,14 +206,14 @@ class QueryPersistenceContextStudyTest {
     fun `12 Hibernate COMMIT에서는 관리 객체가 있어도 DB 조건 조회에서 빠질 수 있다`() {
         em.flushMode = FlushModeType.COMMIT
         val newcomer = QueryStudyMember(2L, 102L, "lee")
-        em.persist(newcomer)
+        em.persist(newcomer) // 영속화
 
-        assertSame(newcomer, repository.findById(2L).orElseThrow())
-        assertNull(repository.findByName("lee"))
+        assertSame(newcomer, repository.findById(2L).orElseThrow()) // 영속성 컨텍스트에서 조회
+        assertNull(repository.findByName("lee")) // select 쿼리 실행. COMMIT 모드에서는 flush가 발생하지 않아 DB에 INSERT되지 않았다.
         assertSql("select")
 
         em.flush() // COMMIT 모드에서도 명시적 flush는 가능하다.
-        assertSame(newcomer, repository.findByName("lee"))
+        assertSame(newcomer, repository.findByName("lee")) // JPQL 발생
         assertSql("select", "insert", "select")
         // COMMIT에서 미반영 변경이 쿼리에 미치는 영향은 JPA 명세상 unspecified.
         // 이 테스트는 Hibernate의 동작을 검증하며 다른 구현체에 일반화하지 않는다.
@@ -222,14 +222,14 @@ class QueryPersistenceContextStudyTest {
     @Test
     fun `13 COMMIT에서 DB 조건과 반환 객체의 필드 값이 다를 수 있다`() {
         em.flushMode = FlushModeType.COMMIT
-        val managed = repository.findById(1L).orElseThrow()
-        managed.name = "changed"
+        val managed = repository.findById(1L).orElseThrow() // select
+        managed.name = "changed" // 변경 감지. 아직 flush되지 않았다.
 
-        val byOldName = assertNotNull(repository.findByName("kim"))
-        assertSame(managed, byOldName)
-        assertEquals("changed", byOldName.name)
-        assertNull(repository.findByName("changed"))
-        assertEquals("kim", databaseName())
+        val byOldName = assertNotNull(repository.findByName("kim")) // select
+        assertSame(managed, byOldName) // 반환된 객체는 영속성 컨텍스트의 기존 관리 객체다.
+        assertEquals("changed", byOldName.name) // 관리 객체의 필드 값은 이미 변경되었다.
+        assertNull(repository.findByName("changed")) // select
+        assertEquals("kim", databaseName()) // select
         assertSql("select", "select", "select", "select")
         // WHERE는 DB 값 kim으로 평가. 반환 엔티티는 메모리의 기존 changed 객체.
     }
@@ -249,26 +249,26 @@ class QueryPersistenceContextStudyTest {
 
     @Test
     fun `15 clear는 flush하지 않으므로 미반영 변경을 잃을 수 있다`() {
-        val first = repository.findById(1L).orElseThrow()
+        val first = repository.findById(1L).orElseThrow() // select
         first.name = "lost-change"
-        em.clear()
+        em.clear() // 영속성 컨텍스트 초기화
         em.flush()
 
-        val reloaded = repository.findById(1L).orElseThrow()
+        val reloaded = repository.findById(1L).orElseThrow() // select
         assertEquals("kim", reloaded.name)
         assertEquals("lost-change", first.name)
-        assertFalse(em.contains(first))
+        assertFalse(em.contains(first)) // clear로 관리 객체가 제거되었다.
         assertSql("select", "select")
     }
 
     @Test
     fun `16 벌크 UPDATE 후 엔티티 재조회는 refresh와 다르다`() {
-        val managed = repository.findById(1L).orElseThrow()
-        assertEquals(1, repository.renameInBulk(1L, "bulk-changed"))
+        val managed = repository.findById(1L).orElseThrow() // select
+        assertEquals(1, repository.renameInBulk(1L, "bulk-changed")) // 벌크 DML은 flush를 유발하지 않는다. (DB에 바로 적용)
 
-        assertEquals("bulk-changed", databaseName())
-        assertEquals("kim", managed.name) // 벌크 DML은 관리 객체를 동기화하지 않는다.
-        assertSame(managed, repository.findUsingJpql(1L))
+        assertEquals("bulk-changed", databaseName()) // select
+        assertEquals("kim", managed.name) // 벌크 DML은 관리 객체를 동기화하지 않는다. (flush가 발생하지 않아 영속성 컨텍스트의 값과 DB 값 사이의 불일치 발생)
+        assertSame(managed, repository.findUsingJpql(1L)) // select -> 영속성 컨텍스트에서 기존 관리 객체를 반환
         assertEquals("kim", managed.name) // SELECT 재실행 자체는 refresh가 아니다.
         assertEquals("bulk-changed", repository.findNameUsingJpql(1L)) // 스칼라는 DB 값.
         assertSql("select", "update", "select", "select", "select")
